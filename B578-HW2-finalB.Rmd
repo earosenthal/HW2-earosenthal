@@ -1,0 +1,78 @@
+Biostat 578A HW2 Elisabeth Rosenthal
+========================================================
+
+
+
+```{r}
+library(data.table)
+library(knitr)
+# access bioconductor
+source("http://bioconductor.org/biocLite.R")
+# install GEO meta database
+biocLite("GEOmetadb")
+# get GE0 meta database package
+library(GEOmetadb)
+
+library(GEOquery)
+# Download the mapping information and processed data
+gds <- getGEO("GSE40812") 
+# gds is a list with one element, which is an Expression set
+gds[1]
+names(pData(gds[[1]]))
+gds.pdata <- pData(gds[[1]])
+summary(gds.pdata[,"characteristics_ch1"]) # infection status
+summary(gds.pdata[,"characteristics_ch1.1"]) # cell type
+summary(gds.pdata[,"characteristics_ch1.2"]) # treatment (mock or poly)
+summary(gds.pdata[,"description"]) # experimental conditions for each record
+summary(gds.pdata[,"data_processing"]) # the values have already been Normalized using lumi package in bioconductor
+
+
+# there are no supplementary files
+# create a new expression set with just the data that I need
+gds_new <- gds
+keepCols <- c(
+  "title", "characteristics_ch1", "characteristics_ch1.2")
+pd <- gds.pdata[,keepCols]
+colnames(pd) <- c("ptid", "vl.status", "poly")
+split.ptid <- unlist(strsplit(as.character(pd$ptid), split = '_'))
+pd$ptid <- split.ptid[grep("[0-9]{4}", split.ptid)]
+pd$vl.status <- ifelse(grepl("Pos", pd$vl.status),1,0)
+pd$poly <- ifelse(grepl("Poly", pd$poly),1,0)
+pData(gds_new[[1]]) <- pd
+
+# set up the design matrix and run the model
+biocLite("limma")
+library(limma)
+
+mm.check <- model.matrix(~ vl.status, gds_new[[1]]) # perform first test to get the genes that are differentially expressed with respect to vl.status. Including ptid makes it not estimable. 
+fit.check <- lmFit(gds_new[[1]], mm.check)
+ebay.check <- eBayes(fit.check)
+topTable(ebay.check, coef="vl.status") # only one gene has an adjusted p-value less than 0.05. 
+
+mm.check <- model.matrix(~ vl.status+poly, gds_new[[1]]) #not estimable if I include ptids.
+fit.check <- lmFit(gds_new[[1]], mm.check)
+ebay.check <- eBayes(fit.check)
+
+topTable(ebay.check, coef="poly")
+topTable(ebay.check, coef="vl.status")
+
+# expression not associated with vl.status
+
+mm.check <- model.matrix(~ ptid + poly, gds_new[[1]]) 
+fit.check <- lmFit(gds_new[[1]], mm.check)
+ebay.check <- eBayes(fit.check)
+
+topTable(ebay.check, coef="poly")
+
+# get the top 43, even though it looks like there are more differentialy expressed genes.I think that there are probably some QC that needs to happen. 
+top.poly <- data.table(topTable(ebay.check, coef="poly", p.value=1e-6, number=43))
+probe.keep <- top.poly[,Probe_Id]
+setkey(top.poly, Probe_Id)
+probes <- rownames(exprs(gds_new[[1]]))
+gds.exprs <- data.table(exprs(gds_new[[1]]))
+gds.exprs <- gds.exprs[,Probe_Id:=probes]
+setkey(gds.exprs,Probe_Id)
+check.norm <- gds.exprs[][Probe_Id %in% probe.keep]
+check.norm[,Probe_Id := NULL]
+heatmap(as.matrix(check.norm), scale="row")
+
