@@ -76,3 +76,4 @@ check.norm <- gds.exprs[][Probe_Id %in% probe.keep]
 check.norm[,Probe_Id := NULL]
 heatmap(as.matrix(check.norm), scale="row")
 
+```
